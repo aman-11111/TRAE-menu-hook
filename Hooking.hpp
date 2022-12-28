@@ -1,6 +1,8 @@
 #pragma once
 
 #include <memory>
+#include <map>
+#include <string>
 #include "vendor/MinHook.h"
 #include "Game.hpp"
 #include "Menu.hpp"
@@ -74,3 +76,40 @@ bool InitPatchArchive(const char* name);
 
 extern bool(__cdecl* orgInitPatchArchive)(const char* name);
 extern void(__thiscall* MultiFileSystem_Add)(void* _this, cdc::FileSystem* filesystem, bool unk, bool insertFirst);
+
+#if ROTTR
+class ModInfo {
+public:
+	ModInfo()
+	{
+		filename = "";
+		compressed_size = 0;
+		uncompressed_size = 0;
+	}
+	ModInfo(const char* f, unsigned long c, unsigned long u)
+	{
+		filename = f;
+		compressed_size = c;
+		uncompressed_size = u;
+	}
+	std::string filename;
+	unsigned long compressed_size, uncompressed_size;
+};
+
+extern cdc::FileSystem* g_pOrigFS;
+
+typedef std::map<uint32_t, ModInfo> ModMap;
+extern  ModMap g_ModFileList;
+
+extern void ReadModFileList();
+
+void DLCSystem_Create(void);
+extern void(__cdecl* orgDLCSystem_Create)(void);
+
+void* TigerArchiveFileSystem_RequestRead(void* _this, void* receiver, const char* fileName, unsigned int startOffset);
+extern void* (__cdecl* orgTigerArchiveFileSystem_RequestRead)(void* _this, void* receiver, const char* fileName, unsigned int startOffset);
+
+int ReceiveData(cdc::ResolveReceiver* _this, void* FileRequest, char* param_1, int param_2, unsigned int param_3);
+extern int(__cdecl* orgReceiveData)(cdc::ResolveReceiver* _this, void* FileRequest, char* param_1, int param_2, unsigned int param_3);
+
+#endif

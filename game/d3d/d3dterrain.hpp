@@ -48,4 +48,8 @@ void InsertTerrainDrawableHooks();
 #define gTextureLess VAR_U_(ADDR(0x107E57C, 0x1075BD0), int)
 #define gWireFrame VAR_U_(ADDR(0x107E580, 0x1075BD4), int)
 
+#elif ROTTR
+// dummy data from TR8 , just for compilation
+#define gTextureLess VAR_U_(ADDR(0x107E57C, 0x1075BD0), int)
+#define gWireFrame VAR_U_(ADDR(0x107E580, 0x1075BD4), int)
 #endif

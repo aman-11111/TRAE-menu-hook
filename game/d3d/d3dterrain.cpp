@@ -1,4 +1,4 @@
-#ifndef TR8
+#if  !defined(TR8) && !defined(ROTTR)
 #include "d3dterrain.hpp"
 #include "../../Hooking.hpp"
 

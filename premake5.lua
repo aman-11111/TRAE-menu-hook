@@ -1,7 +1,7 @@
 workspace "TRAE-menu-hook"
     architecture "x86"
     configurations { "Debug", "Release" }
-	platforms { "TR7", "TR7DEBUG", "TRAE", "TR8" }
+	platforms { "TR7", "TR7DEBUG", "TRAE", "TR8", "ROTTR" }
 
 project "TRAE-menu-hook"
     kind "SharedLib"
@@ -63,3 +63,9 @@ project "TRAE-menu-hook"
 	filter "platforms:TR8"
 		defines { "TR8" }
 		targetname "TR8-Menu-Hook"
+		
+	filter "platforms:ROTTR"
+		defines { "ROTTR" }
+		targetname "ROTTR-Menu-Hook"
+		architecture "x86_64"
+		

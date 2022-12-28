@@ -8,6 +8,8 @@
 	#define gUnitList *(StreamUnitList**)ADDR(0x1162C54, 0x1159314)
 #elif TR8
 	#define gUnitList *(StreamUnitList**)0xDBA188
+#elif ROTTR
+	#define gUnitList *(StreamUnitList**)0xDBA188
 #endif
 
 struct UnitInfo

@@ -6,6 +6,9 @@
 	#define gObjectList *(ObjectList**)ADDR(0x10F9110, 0x10EFC90)
 #elif TR8
 	#define gObjectList *(ObjectList**)0xDB94D0
+#elif ROTTR
+	// copy from TR8 to pass compilation
+	#define gObjectList *(ObjectList**)0xDB94D0
 #endif
 
 struct ObjectEntry
@@ -14,6 +17,9 @@ struct ObjectEntry
 	char* name;
 	int index;
 #elif TR8
+	int index;
+	char* name;
+#elif ROTTR
 	int index;
 	char* name;
 #endif

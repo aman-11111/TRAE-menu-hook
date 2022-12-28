@@ -46,6 +46,18 @@
 	#define INSTANCELIST ADDR(0x10CEE64, 0x10C5AA4)
 	#define GLOBALDATA ADDR(0x107F920, 0x1076980)
 	#define CAMERAMODE ADDR(0, 0x10FC974)
+#elif ROTTR
+	// dummy data for getting pass compilation
+	#define GAMETRACKER 0x00E7F088
+	#define GAMETRACKER_BASE_AREA (GAMETRACKER + 56)
+	#define MAX_UNIT_LEN 128
+	#define PLAYERINSTANCE 0xE7F094
+
+	#define DISKFS 0x9CE27C
+	#define ARCHIVEFS 0x9CE278
+	#define CONFIGNAME "TR8"
+	#define INSTANCELIST 0xD98D54
+	#define GLOBALDATA 0
 #else
 	#error "No game specified, set TRAE for Anniversary, TR7 for Legend or TR8 for Underworld"
 #endif
@@ -113,6 +125,25 @@ struct Instance
 	int introUniqueID;
 };
 #elif TR8
+struct Object
+{
+	char padding[96];
+	char* name;
+};
+
+struct Instance
+{
+	__int64 node;
+	Instance* next;
+	__int32 prev;
+	Object* object;
+	char padding[12];
+	cdc::Vector position;
+	cdc::Vector rotation;
+	char padding2[24];
+	int introUniqueID;
+};
+#elif ROTTR
 struct Object
 {
 	char padding[96];

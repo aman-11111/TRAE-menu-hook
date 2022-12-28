@@ -209,6 +209,8 @@ void Menu::Process(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
         auto gPlayerControl_Enabled = (bool*)0x666C34;
 #elif TR7
         auto gPlayerControl_Enabled = (bool*)ADDR(0xF1E40C, 0xF15AB4);
+#elif ROTTR
+        auto gPlayerControl_Enabled = (bool*)0x8AB4E6; // dummy address
 #endif
 
         *gPlayerControl_Enabled = !*gPlayerControl_Enabled;
@@ -219,6 +221,8 @@ void Menu::Process(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 #if TRAE || TR7
         auto debugTimeMult = (float*)(GAMETRACKER + 0x13C);
 #elif TR8
+        auto debugTimeMult = (float*)(GAMETRACKER + 0x148);
+#elif ROTTR
         auto debugTimeMult = (float*)(GAMETRACKER + 0x148);
 #endif
 
@@ -278,6 +282,8 @@ void Menu::Process(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
         auto streamFlags = (int*)(GAMETRACKER + 0xC4);
 #elif TR8
         auto streamFlags = (int*)(GAMETRACKER + 0x30);
+#elif ROTTR
+        auto streamFlags = (int*)(GAMETRACKER + 0x30);
 #endif
         if (*streamFlags & 0x1000)
         {
@@ -334,6 +340,8 @@ void Menu::ToggleFlight(bool flight)
     auto ptr = reinterpret_cast<int*>(GAMETRACKER + 227);
 #elif TR8
     auto ptr = reinterpret_cast<int*>(0xE7F143);
+#elif ROTTR
+    auto ptr = reinterpret_cast<int*>(0xE7F143); 
 #endif
 
     if (m_flight)
@@ -361,6 +369,8 @@ void Menu::ProcessFlight(UINT msg, WPARAM wparam)
 #if TRAE || TR7
     auto z = reinterpret_cast<float*>(base + 24);
 #elif TR8
+    auto z = reinterpret_cast<float*>(base + 40);
+#elif ROTTR
     auto z = reinterpret_cast<float*>(base + 40);
 #endif
 
@@ -660,6 +670,8 @@ void Menu::Draw()
             auto unitId = *(int*)(GAMETRACKER + 0xE8);
 #elif TR8
             auto unitId = *(int*)((*(int*)PLAYERINSTANCE) + 224);
+#elif ROTTR
+            auto unitId = *(int*)((*(int*)PLAYERINSTANCE) + 224);
 #endif
 
             auto tracker = Stream::GetObjectTrackerByName(name);
@@ -747,6 +759,16 @@ void Menu::DrawInstanceViewer(bool* show_instance_viewer)
         auto numModels = *(__int16*)(object + 0x3A);
 
         auto name = (char*)*(DWORD*)(object + 0x60);
+        auto intro = *(int*)(clickedInstance + 0x58);
+#elif ROTTR
+        // stand in data from TR8 to get pass compilation
+        auto object = *(DWORD*)(clickedInstance + 0x10);
+        auto data = *(DWORD*)(clickedInstance + 80);
+
+        auto numAnims = *(__int16*)(object + 0x38);
+        auto numModels = *(__int16*)(object + 0x3A);
+
+        auto name = (char*)*(DWORD*)(object + 0x60);  
         auto intro = *(int*)(clickedInstance + 0x58);
 #endif
 

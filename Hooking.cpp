@@ -1,4 +1,5 @@
 #include <string>
+#include <queue>
 #include "Hooking.hpp"
 #include "Game.hpp"
 #include "ControlHooks.hpp"
@@ -18,6 +19,22 @@ Hooking::Hooking()
 	// load config.json into m_config
 	LoadConfig();
 
+#if ROTTR
+	ReadModFileList();
+
+	auto pDLCSystem_Create = FindPattern((PBYTE)"\x48\x83\xEC\x28\x48\x83\x3D\x00\x00\x00\x00\x00\x75\x2E\xB9\x90\x01", "xxxxxxx?????xxxxx");
+	MH_CreateHook(reinterpret_cast<void*>(pDLCSystem_Create), DLCSystem_Create, (void**)&orgDLCSystem_Create);
+	MH_EnableHook(DLCSystem_Create);
+
+	auto pTigerAFS_RequestRead = FindPattern((PBYTE)"\x48\x89\x5C\x24\x18\x56\x41\x56\x41\x57\x48\x83\xEC\x20\x83\x79\x34\x00", "xxxxxxxxxxxxxxxxxx");
+	MH_CreateHook(reinterpret_cast<void*>(pTigerAFS_RequestRead), TigerArchiveFileSystem_RequestRead, (void**)&orgTigerArchiveFileSystem_RequestRead);
+	MH_EnableHook(TigerArchiveFileSystem_RequestRead);
+
+	auto pResolveReceiver_ReceiveData = FindPattern((PBYTE)"\x48\x89\x5C\x24\x08\x44\x89\x4C\x24\x20\x4C\x89\x44\x24\x18\x55\x56\x57\x41\x54\x41\x55\x41\x56\x41\x57\x48\x8D"
+		, "xxxxxxxxxxxxxxxxxxxxxxxxxxxx");
+	MH_CreateHook(reinterpret_cast<void*>(pResolveReceiver_ReceiveData), ReceiveData, (void**)&orgReceiveData);
+	MH_EnableHook(ReceiveData);
+#else
 	// hook into d3d9 creation function and wait for a device
 #if TRAE
 	auto pFound = FindPattern((PBYTE)"\xE8\x00\x00\x00\x00\x85\xC0\x75\x00\xE8\x00\x00\x00\x00\x6A\x00\x6A\x22\xE8", "x????xxx?x????xxxxx");
@@ -70,6 +87,7 @@ Hooking::Hooking()
 #endif
 
 	Game::Initialize();
+#endif
 
 	MH_EnableHook(MH_ALL_HOOKS);
 }
@@ -101,6 +119,8 @@ char __fastcall PCDeviceManager__CreateDevice(DWORD* _this, DWORD _, DWORD a2)
 	auto address = *reinterpret_cast<DWORD*>(0xAD75E4);
 #elif TR7
 	auto address = *reinterpret_cast<DWORD*>(ADDR(0x139C758, 0x1392E18));
+#elif ROTTR
+	auto address = *reinterpret_cast<DWORD*>(0xDEAD0000); // dummy address for now
 #endif
 	pDevice = *reinterpret_cast<IDirect3DDevice9**>(address + 0x20);
 
@@ -135,6 +155,191 @@ cdc::FileSystem* GetFS()
 	return g_pFS;
 #endif
 }
+
+#if ROTTR
+ModMap g_ModFileList;
+unsigned long g_Update1Size; // will append mods at the end of update1 tiger file
+
+void(__cdecl* orgDLCSystem_Create)(void);
+void* (__cdecl* orgTigerArchiveFileSystem_RequestRead)(void* _this, void* receiver, const char* fileName, unsigned int startOffset);
+int(__cdecl* orgReceiveData)(cdc::ResolveReceiver* _this, void* fileRequest, char* param_1, int param_2, unsigned int param_3);
+
+
+void AddModEntry(const char* path, char* fn, unsigned long nFileSizeLow)
+{
+	char* p = fn;                   // section file name is in the form of <type+hash>_<uncompressed size>.<ext>
+	while (*p && isxdigit(*p))
+		p++;
+	if ((p - fn) > 0) // has hex number at start of file name
+	{
+		char* num_end;
+		unsigned long hash = strtoul(fn, &num_end, 16);
+		if (*num_end == '_') // delimiter for file size
+		{
+			unsigned long uncompressed_size = strtoul(num_end + 1, nullptr, 16);  // get uncompress file size
+
+			unsigned long compressed_size = nFileSizeLow; // compressed file size
+			std::string fullpath = path;
+			fullpath += fn;
+			g_ModFileList[hash] = ModInfo(fullpath.c_str(), compressed_size, uncompressed_size);
+		}
+	}
+}
+
+void ReadModFileList()
+{
+	WIN32_FIND_DATAA file;
+	char* ModDir = "Mods\\";
+	std::string fmask = "*.*";
+	std::vector<std::wstring> vs;
+	HANDLE hFind;
+
+	// get file size of update1.000.tiger
+	struct stat stat_buf;
+	int rc = stat("bigfile.update1.000.000.tiger", &stat_buf);
+	g_Update1Size = stat_buf.st_size;
+
+	std::priority_queue<std::string, std::vector<std::string>,
+		std::greater<std::string> > dirs;
+	dirs.push(ModDir); // start with passed directory 
+
+	do {
+		std::string path = dirs.top();// retrieve directory to search
+		dirs.pop();
+
+		if (path[path.size() - 1] != '\\')  // normalize the name.
+			path += "\\";
+
+		std::string mask = path + fmask;    // create mask for searching
+
+		// First search for files:
+		if (INVALID_HANDLE_VALUE == (hFind = FindFirstFileA(mask.c_str(), &file)))
+			continue;
+
+		do {
+			if (!(file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+				AddModEntry(path.c_str(), file.cFileName, file.nFileSizeLow);
+		} while (FindNextFileA(hFind, &file));
+		FindClose(hFind);
+		// Then search for subdirectories:
+		if (INVALID_HANDLE_VALUE == (hFind = FindFirstFileA((path + "*").c_str(), &file)))
+		continue;
+		do {
+			if ((file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && (file.cFileName[0] != '.'))
+				dirs.push(path + file.cFileName);
+		} while (FindNextFileA(hFind, &file));
+		FindClose(hFind);
+	} while (!dirs.empty());
+}
+
+typedef std::map<uint32_t, uint32_t> offset2hash;
+
+offset2hash offset_map; // map file offset to section hash id
+
+cdc::FileSystem* g_pOrigFS = NULL;
+
+
+void DLCSystem_Create(void)
+{
+	orgDLCSystem_Create();
+	//  get g_pDISKFS pointer after it is initialzed
+	auto pFound = FindPattern((PBYTE)"\x48\x8B\x15\x00\x00\x00\x00\x4C\x8D\x05\x00\x00\x00\x00\x48\x8B\xC8", "xxx????xxx????xxx");
+	uint64_t* pDiskFS = (uint64_t*) GetAddress(pFound, 3, 7);
+	g_pOrigFS = (cdc::FileSystem*)*pDiskFS;
+}
+
+void* TigerArchiveFileSystem_RequestRead(void* _this, void* receiver, const char* fileName, unsigned int startOffset)
+{
+	printf("TigerArchiveFile_RequestRead:%s\n", fileName);
+	if (*fileName == '>')  // filename start with ">rq:" is a section request
+	{
+		const char* h = fileName;
+		//uint32_t filesize = *(uint32_t*)(h + 4);
+		//uint16_t fileno = *(uint16_t*)(h + 8);
+		uint16_t archive = *(uint16_t*)(h + 10);
+		uint32_t offset = *(uint32_t*)(h + 12);
+		if (archive == 10) // external section file was assigned to update1.000.tiger 
+		{
+			offset2hash::iterator it = offset_map.find(offset); // look up hash by file offset
+			if (it != offset_map.end())
+			{
+				ModMap::iterator mod_it = g_ModFileList.find(it->second); // lookup external file name by hash
+				if (mod_it != g_ModFileList.end())
+				{
+					void* req = g_pOrigFS->RequestRead(receiver, mod_it->second.filename.c_str(), 0);
+					return req;
+				}
+			}
+		}
+
+	}
+	return orgTigerArchiveFileSystem_RequestRead(_this, receiver, fileName, startOffset);
+}
+
+// cdc::ResolveReceiver::ReceiveData
+int ReceiveData(cdc::ResolveReceiver* _this, void* FileRequest, char* pData, int dataSize, unsigned int param_3)
+{
+	int num = _this->m_numSections;
+	cdc::SectionInfo* secInfoArray;// = _this->m_section;
+	cdc::SectionExtraInfo* secExtraInfoArray;// = _this->m_sectionEx;
+	int datasize = dataSize;
+	int mstate = _this->m_state;
+	int* cur_record = (int*)pData;
+	int drmVer = cur_record[0];
+	if (mstate == 0) // section data processing  started
+	{
+		int remaining_size = dataSize;
+		do {
+			// extract section info from data record
+			int numSections = cur_record[6];
+			int p1_m_dependentDrmLength = cur_record[2];
+			int p1_m_includedDrmLength = cur_record[1];
+
+			secInfoArray = (cdc::SectionInfo*)(cur_record + 8);
+
+			int extrainfo_offset = numSections * 0x14 + 0x20 + p1_m_dependentDrmLength + p1_m_includedDrmLength;
+
+			secExtraInfoArray = (cdc::SectionExtraInfo*)((char*)cur_record + extrainfo_offset);
+			int record_size = extrainfo_offset + numSections * 0x18;
+
+			for (int i = 0; i < numSections; i++)
+			{
+				cdc::SectionInfo* si = secInfoArray + i;
+				cdc::SectionExtraInfo* sEi = secExtraInfoArray + i;
+				uint64_t packedOffset = sEi->packedOffset;
+
+				unsigned long hash = sEi->uniqueId;
+				ModMap::iterator it = g_ModFileList.find(hash);
+				if (it != g_ModFileList.end())  // check if this section hash is in external mod list
+				{
+					uint32_t fsize = g_Update1Size;   //update1.000 tiger file size
+					// all external section file are assigned to update1.000.tiger, file offset is an unsigned 32bit number.
+					// update1 start out at around 500MB. adding too many external sections (mods) will cause offset overflow and crash game.
+
+					uint32_t new_size = (fsize + 0x07ff) & 0xfffff800; // section start on 2k aligned offset
+					uint32_t section_offset = new_size + 0x400;    // section offset need to include file header size of the 000.tiger file
+					// update section offset and force tiger archive id to 10 (update1.000.tiger)
+					sEi->packedOffset = (((uint64_t)section_offset << 0x20) & 0xffffffff00000000) | 0x000a0000; 
+					// increase update1 file size
+					new_size += it->second.compressed_size;
+					// insert extra space after new section to prevent file loader loading sections in batch
+					g_Update1Size = (((new_size + 0x7ff) & 0xfffff800) + 0x20800); 
+					// update offset to hash map
+					offset_map[section_offset] = hash;  
+
+					si->size = it->second.uncompressed_size - (si->packedAsInt >> 8); // substract reclocation records size from uncompress file size
+					sEi->compressedSize = it->second.compressed_size;
+				}
+
+			}
+			remaining_size -= record_size;
+			cur_record = (int *)((uint8_t *) cur_record + record_size);
+		} while (remaining_size != 0);
+	}
+	return orgReceiveData(_this, FileRequest, pData, dataSize, param_3);
+}
+
+#endif
 
 bool(__cdecl* orgInitPatchArchive)(const char* name);
 void(__thiscall* MultiFileSystem_Add)(void* _this, cdc::FileSystem* filesystem, bool unk, bool insertFirst);
@@ -698,6 +903,7 @@ int hooked_Direct3DInit()
 	pFound = FindPattern((PBYTE)"\x8B\x0D\x00\x00\x00\x00\x68\x00\x00\x00\x00\x50\xE8", "xx????x????xx");
 	auto address = **(int**)(pFound + 2);
 #endif
+#if !defined(ROTTR)
 	auto device = *reinterpret_cast<DWORD*>(address + 0x20);
 	pDevice = reinterpret_cast<IDirect3DDevice9*>(device);
 
@@ -706,7 +912,7 @@ int hooked_Direct3DInit()
 	{
 		Hooking::GetInstance().GotDevice();
 	}
-
+#endif
 	return val;
 }
 
