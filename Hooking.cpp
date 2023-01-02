@@ -51,10 +51,10 @@ Hooking::Hooking()
 	MH_CreateHook(reinterpret_cast<void*>(pResolveReceiver_ReceiveData), ReceiveData, (void**)&orgReceiveData);
 	MH_EnableHook(ReceiveData);
 
-	// reload mods files on level load and init
-	auto pSTREAM_LevelLoadAndInit = FindPattern((PBYTE)"\x88\x54\x24\x10\x53\x41\x55\x41\x56\xB8","xxxxxxxxxx");
-	MH_CreateHook(reinterpret_cast<void*>(pSTREAM_LevelLoadAndInit), STREAM_LevelLoadAndInit, (void**)&orgSTREAM_LevelLoadAndInit);
-	MH_EnableHook(STREAM_LevelLoadAndInit);
+	// reload mods files on level load and init. this is not needed
+	//auto pSTREAM_LevelLoadAndInit = FindPattern((PBYTE)"\x88\x54\x24\x10\x53\x41\x55\x41\x56\xB8","xxxxxxxxxx");
+	//MH_CreateHook(reinterpret_cast<void*>(pSTREAM_LevelLoadAndInit), STREAM_LevelLoadAndInit, (void**)&orgSTREAM_LevelLoadAndInit);
+	//MH_EnableHook(STREAM_LevelLoadAndInit);
 
 	auto pReloadSection = FindPattern((PBYTE)"\x48\x89\x5C\x24\x20\x57\x41\x56\x41\x57\x48\x83\xEC\x40", "xxxxxxxxxxxxxx");
 	TigerSectionLoader_ReloadSection = reinterpret_cast<bool(__thiscall*)(const struct cdc::SectionInfo& const, const struct cdc::SectionExtraInfo& const, void*, unsigned int*, bool)>(pReloadSection);
@@ -519,7 +519,7 @@ int ReceiveData(cdc::ResolveReceiver* _this, void* FileRequest, char* pData, int
 
 void* STREAM_LevelLoadAndInit(char* baseAreaName, bool bInitPlayer)
 {
-	ReadModFileList();
+//	ReadModFileList();
 	return orgSTREAM_LevelLoadAndInit(baseAreaName, bInitPlayer);
 }
 
