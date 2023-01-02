@@ -33,11 +33,11 @@ namespace cdc
 	{
 		union
 		{
-			const unsigned __int64 kArchiveIndexBits;
-			const unsigned __int64 kArchiveIndexMask;
-			const unsigned __int64 kDLCIndexBits;
-			const unsigned __int64 kDLCIndexMask;
-			const unsigned __int64 kOffsetMask;
+			unsigned __int64 kArchiveIndexBits;
+			unsigned __int64 kArchiveIndexMask;
+			unsigned __int64 kDLCIndexBits;
+			unsigned __int64 kDLCIndexMask;
+			unsigned __int64 kOffsetMask;
 			unsigned int uniqueId;
 		}; 
 		unsigned __int64 packedOffset;
@@ -107,6 +107,20 @@ namespace cdc
 			};
 		}; 
 	}; 
+	struct SectionLoaderEntry
+	{
+		/* 0x0000 */ void* pLoadData;// struct SectionLoadingData* pLoadData;
+		/* 0x0008 */ unsigned int uniqueId;
+		/* 0x000c */ unsigned short refCount;
+		struct /* bitfield */
+		{
+			/* 0x000e */ unsigned short state : 4; /* bit position: 0 */
+			/* 0x000e */ unsigned short isHighPriority : 1; /* bit position: 4 */
+			/* 0x000e */ unsigned short isLoading : 1; /* bit position: 5 */
+			/* 0x000e */ unsigned short hasInfo : 1; /* bit position: 6 */
+		}; /* bitfield */
+	}; /* size: 0x0010 */
+
 #endif
 
 	class FileSystem

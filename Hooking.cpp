@@ -20,11 +20,27 @@ Hooking::Hooking()
 	LoadConfig();
 
 #if ROTTR
+	InitializeCriticalSection(&g_PatchCS);
+
 	ReadModFileList();
 
 	auto pDLCSystem_Create = FindPattern((PBYTE)"\x48\x83\xEC\x28\x48\x83\x3D\x00\x00\x00\x00\x00\x75\x2E\xB9\x90\x01", "xxxxxxx?????xxxxx");
 	MH_CreateHook(reinterpret_cast<void*>(pDLCSystem_Create), DLCSystem_Create, (void**)&orgDLCSystem_Create);
 	MH_EnableHook(DLCSystem_Create);
+
+	auto  pResetIntros_Restart = FindPattern((PBYTE)"\x41\x54\x41\x55\x41\x56\x41\x57\x48\x81\xEC\xC8\x00\x00\x00", "xxxxxxxxxxxxxxx");
+	MH_CreateHook(reinterpret_cast<void*>(pResetIntros_Restart), ResetIntros_Restart, (void**)&orgResetIntros_Restart);
+	MH_EnableHook(ResetIntros_Restart);
+
+	auto  pSection_HashMapFind = FindPattern((PBYTE)"\x48\x8D\x0D\x00\x00\x00\x00\xE8\x00\x00\x00\x00\x0F\xB7\x50\x0C\x8D\x4A\x01",
+		"xxx????x????xxxxxxx");		
+	g_pSectionMap = (void*) GetAddress(pSection_HashMapFind, 3, 7);
+	void *pHashMap_find_func = GetAddress(pSection_HashMapFind, 8, 12);
+	HashMapFind = reinterpret_cast<cdc::SectionLoaderEntry*(__thiscall*)(void*, unsigned int)>(pHashMap_find_func);
+
+	auto pAllocGlobal_func = FindPattern((PBYTE)"\x40\x53\x48\x83\xEC\x20\x80\x3D\x00\x00\x00\x00\x00\x48\x8B\xD9\x75\x05\xE8\x00\x00\x00\x00"
+		"\x48\x8B\x0D\x00\x00\x00\x00\x41\xB8\x01", "xxxxxxxx?????xxxxxx????xxx????xxx");	 
+	AllocGlobal = reinterpret_cast<void * (__thiscall*)(uint64_t)>(pAllocGlobal_func);
 
 	auto pTigerAFS_RequestRead = FindPattern((PBYTE)"\x48\x89\x5C\x24\x18\x56\x41\x56\x41\x57\x48\x83\xEC\x20\x83\x79\x34\x00", "xxxxxxxxxxxxxxxxxx");
 	MH_CreateHook(reinterpret_cast<void*>(pTigerAFS_RequestRead), TigerArchiveFileSystem_RequestRead, (void**)&orgTigerArchiveFileSystem_RequestRead);
@@ -34,6 +50,15 @@ Hooking::Hooking()
 		, "xxxxxxxxxxxxxxxxxxxxxxxxxxxx");
 	MH_CreateHook(reinterpret_cast<void*>(pResolveReceiver_ReceiveData), ReceiveData, (void**)&orgReceiveData);
 	MH_EnableHook(ReceiveData);
+
+	// reload mods files on level load and init
+	auto pSTREAM_LevelLoadAndInit = FindPattern((PBYTE)"\x88\x54\x24\x10\x53\x41\x55\x41\x56\xB8","xxxxxxxxxx");
+	MH_CreateHook(reinterpret_cast<void*>(pSTREAM_LevelLoadAndInit), STREAM_LevelLoadAndInit, (void**)&orgSTREAM_LevelLoadAndInit);
+	MH_EnableHook(STREAM_LevelLoadAndInit);
+
+	auto pReloadSection = FindPattern((PBYTE)"\x48\x89\x5C\x24\x20\x57\x41\x56\x41\x57\x48\x83\xEC\x40", "xxxxxxxxxxxxxx");
+	TigerSectionLoader_ReloadSection = reinterpret_cast<bool(__thiscall*)(const struct cdc::SectionInfo& const, const struct cdc::SectionExtraInfo& const, void*, unsigned int*, bool)>(pReloadSection);
+
 #else
 	// hook into d3d9 creation function and wait for a device
 #if TRAE
@@ -95,6 +120,7 @@ Hooking::Hooking()
 Hooking::~Hooking()
 {
 	MH_Uninitialize();
+	DeleteCriticalSection(&g_PatchCS);
 }
 
 std::shared_ptr<Menu>& Hooking::GetMenu() noexcept
@@ -157,12 +183,35 @@ cdc::FileSystem* GetFS()
 }
 
 #if ROTTR
-ModMap g_ModFileList;
-unsigned long g_Update1Size; // will append mods at the end of update1 tiger file
+ModMap g_ModFileList;   // contains mod file info
+unsigned long g_Update1Size; // grow when append mods at the end of update1 tiger file, used as a look up key for mod
+
+typedef std::map<uint32_t, uint32_t> offset2hash;
+
+offset2hash g_OffsetMap; // map file offset to unique hash
+
+CRITICAL_SECTION g_PatchCS;
+
+cdc::FileSystem* g_pOrigFS = NULL;  // tiger disk file system
 
 void(__cdecl* orgDLCSystem_Create)(void);
 void* (__cdecl* orgTigerArchiveFileSystem_RequestRead)(void* _this, void* receiver, const char* fileName, unsigned int startOffset);
 int(__cdecl* orgReceiveData)(cdc::ResolveReceiver* _this, void* fileRequest, char* param_1, int param_2, unsigned int param_3);
+void* (__cdecl* orgSTREAM_LevelLoadAndInit)(char* baseAreaName, bool bInitPlayer);
+
+bool(__thiscall* TigerSectionLoader_ReloadSection)(const struct cdc::SectionInfo& const, const struct cdc::SectionExtraInfo& const, void*, unsigned int*, bool);
+
+PatchSectionMap g_PatchList;
+
+cdc::SectionLoaderEntry* (__thiscall* HashMapFind)(void* sectionMap, unsigned int uniqueid);
+void* (__thiscall* AllocGlobal)(uint64_t size);
+
+void(__cdecl* orgResetIntros_Restart)(void* stateToRestore, bool bRestorePlayerFromCheckpoint, bool loadingScreen, bool scriptRefresh);
+
+void* g_pSectionMap;  // cdc global section info map
+
+unsigned long PatchSectionInfo(unsigned int hash, cdc::SectionInfo* si, cdc::SectionExtraInfo* sEi, unsigned long newUncompressedSize,
+	unsigned long newCompressedSize);
 
 
 void AddModEntry(const char* path, char* fn, unsigned long nFileSizeLow)
@@ -199,6 +248,8 @@ void ReadModFileList()
 	int rc = stat("bigfile.update1.000.000.tiger", &stat_buf);
 	g_Update1Size = stat_buf.st_size;
 
+	g_ModFileList.clear();
+
 	std::priority_queue<std::string, std::vector<std::string>,
 		std::greater<std::string> > dirs;
 	dirs.push(ModDir); // start with passed directory 
@@ -232,13 +283,6 @@ void ReadModFileList()
 	} while (!dirs.empty());
 }
 
-typedef std::map<uint32_t, uint32_t> offset2hash;
-
-offset2hash offset_map; // map file offset to section hash id
-
-cdc::FileSystem* g_pOrigFS = NULL;
-
-
 void DLCSystem_Create(void)
 {
 	orgDLCSystem_Create();
@@ -250,7 +294,6 @@ void DLCSystem_Create(void)
 
 void* TigerArchiveFileSystem_RequestRead(void* _this, void* receiver, const char* fileName, unsigned int startOffset)
 {
-	printf("TigerArchiveFile_RequestRead:%s\n", fileName);
 	if (*fileName == '>')  // filename start with ">rq:" is a section request
 	{
 		const char* h = fileName;
@@ -260,12 +303,17 @@ void* TigerArchiveFileSystem_RequestRead(void* _this, void* receiver, const char
 		uint32_t offset = *(uint32_t*)(h + 12);
 		if (archive == 10) // external section file was assigned to update1.000.tiger 
 		{
-			offset2hash::iterator it = offset_map.find(offset); // look up hash by file offset
-			if (it != offset_map.end())
+			PATCH_LOCK;
+			offset2hash::iterator it = g_OffsetMap.find(offset); // look up hash by file offset
+			PATCH_UNLOCK;
+			if (it != g_OffsetMap.end())
 			{
 				ModMap::iterator mod_it = g_ModFileList.find(it->second); // lookup external file name by hash
 				if (mod_it != g_ModFileList.end())
 				{
+					/*unsigned int len = g_pOrigFS->GetFileSize(mod_it->second.filename.c_str());
+					if (len == 0)
+						return NULL;*/
 					void* req = g_pOrigFS->RequestRead(receiver, mod_it->second.filename.c_str(), 0);
 					return req;
 				}
@@ -274,6 +322,128 @@ void* TigerArchiveFileSystem_RequestRead(void* _this, void* receiver, const char
 
 	}
 	return orgTigerArchiveFileSystem_RequestRead(_this, receiver, fileName, startOffset);
+}
+
+// called when restart from a checkpoint
+void ResetIntros_Restart(void* stateToRestore, bool bRestorePlayerFromCheckpoint, bool loadingScreen, bool scriptRefresh)
+{
+	ReadModFileList(); // get new mod list, this reset g_Update1size to original file size
+	PatchSectionMap::iterator x = g_PatchList.begin();
+
+	while (x != g_PatchList.end())  // go through sections that had been patched in memory
+	{
+		unsigned int uniqueId = x->second.extraInfo.uniqueId;
+		// read global section map for section status
+		cdc::SectionLoaderEntry* loader = HashMapFind(g_pSectionMap, uniqueId);
+		bool hasInfo = loader->hasInfo; // was this section loaded
+		bool bDeleteIt = false;
+		ModMap::iterator it = g_ModFileList.find(uniqueId);
+		if (it == g_ModFileList.end())   // patch does not  exist in  new ModList  
+		{
+			if (hasInfo) // section is active
+			{
+
+				// must allocate global memory for sectionInfo and extraInfo
+				cdc::SectionInfo* pInfo = (cdc::SectionInfo*)AllocGlobal(0x14);
+				cdc::SectionExtraInfo* pExtraInfo = (cdc::SectionExtraInfo*)AllocGlobal(0x18);
+				memcpy(pInfo, &(x->second.info), 0x14);
+				memcpy(pExtraInfo, &(x->second.extraInfo), 0x18);
+
+				// need to delete OffsetMap and PatchList
+				PATCH_LOCK;
+				offset2hash::iterator oit = g_OffsetMap.find(x->second.tigerOffset);
+				if (oit != g_OffsetMap.end())
+					g_OffsetMap.erase(oit);
+				// delete PatchList
+				bDeleteIt = true;
+				x = g_PatchList.erase(x);
+				PATCH_UNLOCK;
+
+				// revert to factory section info
+				TigerSectionLoader_ReloadSection(*pInfo, *pExtraInfo, 0, 0, 1); 
+			}
+			else
+			{
+				PATCH_LOCK;
+				bDeleteIt = true;
+				x = g_PatchList.erase(x);
+				PATCH_UNLOCK;
+			}
+		}
+		else
+		{
+			if (hasInfo)  // section is active
+			{
+				// must allocate global memory for sectionInfo and extraInfo
+				cdc::SectionInfo* pInfo = (cdc::SectionInfo *) AllocGlobal(0x14);
+				cdc::SectionExtraInfo* pExtraInfo = (cdc::SectionExtraInfo *) AllocGlobal(0x18);
+				memcpy(pInfo, &(x->second.info), 0x14);
+				memcpy(pExtraInfo, &(x->second.extraInfo), 0x18);
+				// calculate new offset in update1tiger file
+				unsigned long tigerOffset=PatchSectionInfo(uniqueId, pInfo, pExtraInfo, it->second.uncompressed_size, it->second.compressed_size);
+				x->second.tigerOffset = tigerOffset;
+				TigerSectionLoader_ReloadSection(*pInfo, *pExtraInfo, 0, 0, 1); // force reload of section
+			}
+			else
+			{
+				PATCH_LOCK;
+				//offset2hash::iterator oit = g_OffsetMap.find(x->second.tigerOffset);
+				//if (oit != g_OffsetMap.end())
+				//	g_OffsetMap.erase(oit);
+				bDeleteIt = true;
+				x = g_PatchList.erase(x);
+				PATCH_UNLOCK;
+			}
+		}
+		if (!bDeleteIt) 
+			++x;  // get next entry the usual way
+	}
+#if 0    // still don;t know how to construct new SectionInfo and ExtraInfo without loading a  drm file
+	// look for new mods that need to be apply to active section
+	for (auto const& x : g_ModFileList)
+	{
+		// Is this section not in active patch
+		if (g_PatchList.find(x.first) == g_PatchList.end())
+		{
+			cdc::SectionLoaderEntry* loader = HashMapFind(g_pSectionMap, x.first);
+			bool hasInfo = loader->hasInfo; // Is this section being used by the engine
+			if (hasInfo)
+			{
+				
+				// create new patch info with new update1 file offset
+				//PatchSectionInfo(uniqueId, &info, &extraInfo, it->second.compressed_size, it->second.uncompressed_size);
+				//TigerSectionLoader_ReloadSection(info, extraInfo, 0, 0, 1); // force reload of section
+			}
+		}
+	}
+#endif
+	orgResetIntros_Restart(stateToRestore, bRestorePlayerFromCheckpoint, loadingScreen, scriptRefresh);
+}
+
+unsigned long PatchSectionInfo(unsigned int hash, cdc::SectionInfo *si, cdc::SectionExtraInfo* sEi, unsigned long newUncompressedSize,
+	unsigned long newCompressedSize)
+{
+	uint32_t fsize = g_Update1Size;   //update1.000 tiger file size
+	// all external section file are assigned to update1.000.tiger, file offset is an unsigned 32bit number.
+	// update1 start out at around 500MB. adding too many external sections (mods) will cause offset overflow and crash game.
+	
+	uint32_t section_tiger_offset;
+
+	uint32_t new_size = (fsize + 0x07ff) & 0xfffff800; // section start on 2k aligned offset
+	section_tiger_offset = new_size + 0x400;    // section offset need to include file header size of the 000.tiger file
+	// update section offset and force tiger archive id to 10 (update1.000.tiger)
+	sEi->packedOffset = (((uint64_t)section_tiger_offset << 0x20) & 0xffffffff00000000) | 0x000a0000;
+	// pretending update1 file size has increased
+	new_size += newCompressedSize;
+	// insert extra space after new section to prevent file loader loading sections in batch
+	g_Update1Size = (((new_size + 0x7ff) & 0xfffff800) + 0x20800);
+	// update offset to hash map
+	g_OffsetMap[section_tiger_offset] = hash;
+
+	si->size = newUncompressedSize - (si->packedAsInt >> 8); // substract reclocation records size from uncompress file size
+	sEi->compressedSize = newCompressedSize;
+
+	return section_tiger_offset;
 }
 
 // cdc::ResolveReceiver::ReceiveData
@@ -307,36 +477,50 @@ int ReceiveData(cdc::ResolveReceiver* _this, void* FileRequest, char* pData, int
 				cdc::SectionInfo* si = secInfoArray + i;
 				cdc::SectionExtraInfo* sEi = secExtraInfoArray + i;
 				uint64_t packedOffset = sEi->packedOffset;
-
+				unsigned long section_tiger_offset;
 				unsigned long hash = sEi->uniqueId;
 				ModMap::iterator it = g_ModFileList.find(hash);
-				if (it != g_ModFileList.end())  // check if this section hash is in external mod list
+				if (it != g_ModFileList.end())  // check this section hash is in external mod list
 				{
-					uint32_t fsize = g_Update1Size;   //update1.000 tiger file size
-					// all external section file are assigned to update1.000.tiger, file offset is an unsigned 32bit number.
-					// update1 start out at around 500MB. adding too many external sections (mods) will cause offset overflow and crash game.
-
-					uint32_t new_size = (fsize + 0x07ff) & 0xfffff800; // section start on 2k aligned offset
-					uint32_t section_offset = new_size + 0x400;    // section offset need to include file header size of the 000.tiger file
-					// update section offset and force tiger archive id to 10 (update1.000.tiger)
-					sEi->packedOffset = (((uint64_t)section_offset << 0x20) & 0xffffffff00000000) | 0x000a0000; 
-					// increase update1 file size
-					new_size += it->second.compressed_size;
-					// insert extra space after new section to prevent file loader loading sections in batch
-					g_Update1Size = (((new_size + 0x7ff) & 0xfffff800) + 0x20800); 
-					// update offset to hash map
-					offset_map[section_offset] = hash;  
-
-					si->size = it->second.uncompressed_size - (si->packedAsInt >> 8); // substract reclocation records size from uncompress file size
-					sEi->compressedSize = it->second.compressed_size;
+					PATCH_LOCK;
+					PatchSectionMap::iterator pit = g_PatchList.find(hash);
+					PATCH_UNLOCK;
+					if (pit == g_PatchList.end())  // first time loading this patch
+					{
+						PATCH_LOCK;
+						PatchInfo& p = g_PatchList[hash]; // create new patch record
+						p.info = *si;
+						p.extraInfo = *sEi;  // keep a record of oiginal section info
+						// replace file id, offset and sizes
+						section_tiger_offset = PatchSectionInfo(hash, si, sEi,  it->second.uncompressed_size, it->second.compressed_size);
+						p.tigerOffset = section_tiger_offset; // this is the key for deleting offset_map entry
+						PATCH_UNLOCK;
+					}
+					else
+					{					 
+						// fetch from existing patch
+						PATCH_LOCK;
+						section_tiger_offset = pit->second.tigerOffset;					
+						sEi->packedOffset = (((uint64_t)section_tiger_offset << 0x20) & 0xffffffff00000000) | 0x000a0000;
+						si->size = it->second.uncompressed_size - (si->packedAsInt >> 8); // substract reclocation records size from uncompress file size
+						sEi->compressedSize = it->second.compressed_size;
+						pit->second.info = *si;
+						pit->second.extraInfo = *sEi;
+						PATCH_UNLOCK;
+					}
 				}
-
 			}
 			remaining_size -= record_size;
 			cur_record = (int *)((uint8_t *) cur_record + record_size);
 		} while (remaining_size != 0);
 	}
 	return orgReceiveData(_this, FileRequest, pData, dataSize, param_3);
+}
+
+void* STREAM_LevelLoadAndInit(char* baseAreaName, bool bInitPlayer)
+{
+	ReadModFileList();
+	return orgSTREAM_LevelLoadAndInit(baseAreaName, bInitPlayer);
 }
 
 #endif

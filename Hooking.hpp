@@ -80,7 +80,7 @@ extern void(__thiscall* MultiFileSystem_Add)(void* _this, cdc::FileSystem* files
 #if ROTTR
 class ModInfo {
 public:
-	ModInfo()
+	ModInfo()  // contains mod (section) file info
 	{
 		filename = "";
 		compressed_size = 0;
@@ -96,6 +96,25 @@ public:
 	unsigned long compressed_size, uncompressed_size;
 };
 
+class  PatchInfo   // contains original pre-patch section data, for reverting patch when mod file was deleted at runtime
+{
+public:
+	PatchInfo()
+	{
+	}
+	cdc::SectionInfo info;   // original unmodified  section info
+	cdc::SectionExtraInfo extraInfo; // original unmodifed extra info
+	unsigned long tigerOffset;    // fake update1.tiger offset
+};
+
+typedef std::map<unsigned int, PatchInfo>  PatchSectionMap;
+
+extern CRITICAL_SECTION g_PatchCS;  // not sure we need to protect patch map from multithread access 
+
+extern void* g_pSectionMap;  // a global cdc::HashMap that contains info for all loaded Section
+
+#define PATCH_LOCK      EnterCriticalSection(&g_PatchCS)
+#define PATCH_UNLOCK    LeaveCriticalSection(&g_PatchCS)
 extern cdc::FileSystem* g_pOrigFS;
 
 typedef std::map<uint32_t, ModInfo> ModMap;
@@ -112,4 +131,14 @@ extern void* (__cdecl* orgTigerArchiveFileSystem_RequestRead)(void* _this, void*
 int ReceiveData(cdc::ResolveReceiver* _this, void* FileRequest, char* param_1, int param_2, unsigned int param_3);
 extern int(__cdecl* orgReceiveData)(cdc::ResolveReceiver* _this, void* FileRequest, char* param_1, int param_2, unsigned int param_3);
 
+void* STREAM_LevelLoadAndInit(char * baseAreaName, bool bInitPlayer);
+extern void* (__cdecl* orgSTREAM_LevelLoadAndInit)(char* baseAreaName, bool bInitPlayer);
+
+extern bool(__thiscall* TigerSectionLoader_ReloadSection)(const struct cdc::SectionInfo& const, const struct cdc::SectionExtraInfo& const, void*, unsigned int*, bool);
+
+void ResetIntros_Restart(void* stateToRestore, bool bRestorePlayerFromCheckpoint, bool loadingScreen, bool scriptRefresh);
+extern void(__cdecl* orgResetIntros_Restart)(void* stateToRestore, bool bRestorePlayerFromCheckpoint, bool loadingScreen, bool scriptRefresh);
+
+extern cdc::SectionLoaderEntry* (__thiscall* HashMapFind)(void* sectionMap, unsigned int uniqueid);
+extern void* (__thiscall* AllocGlobal)(uint64_t size);
 #endif
