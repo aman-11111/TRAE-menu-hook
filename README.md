@@ -6,8 +6,8 @@ It does not offer any menu, it load mod files (AlphaZomega's style ROTTR mod fil
 This currently only works for steam build 1026 and the current stream build (1027 ???).
 
 ## Installation:
--copy d3d12.dll and ROTTR-Menu-Hook.asi from bin\ direcotry to ROTTR installation directory.
--create a mods\ subdirectory under ROTTR installation directory
+- copy d3d12.dll and ROTTR-Menu-Hook.asi from bin\ direcotry to ROTTR installation directory.
+- create a mods\ subdirectory under ROTTR installation directory
 
 ## To convert existing mods:
 - Get the mod_prep_tools\ and contents folder from this github
