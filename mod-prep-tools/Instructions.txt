@@ -1,0 +1,24 @@
+What is included: 
+This is an expansion of ThelIndra55's TRAE-menu-hook  (https://github.com/TheIndra55/TRAE-menu-hook) to enable ROTTR loading of external mod file.
+It does not offer any menu, it load mod files (*.tr2mesh *.tr2pcd) into game on game start, no need to install these files to update tiger archive.
+This currently only works for steam build 1026 and the current stream build (1027 ???).
+
+Installtion:
+-copy d3d12.dll and ROTTR-Menu-Hook.asi from bin\ direcotry to ROTTR installation directory.
+-create a mods\ subdirectory under ROTTR installation directory
+
+To convert existing mods:
+- Assumptions: all .tr2mesh and .tr2pcd  file conatins section number in their file name.
+copy  ??????.drm and the corresponding *.tr2mesh *.tr2pcd file to the mod_prep_tools\ directory
+- switch to mod_prep_tools\ dir, run  convert.cmd  <drm file name>
+- if all goes well, you will get a mod_out\ folder contain the renamed assets. 
+- rename mod_out\ to something like 00001_<mod_name>\ and move this directory inside <ROTTR_game_dir>/mods/
+- you can have more than one  000??_<mod_name> inside mods/. The bigger 000?? number mods override the lowest number if they contain the same asset file name
+ 
+
+-Uninstall a mods:
+delete the 000??_<mod name> folder
+
+-uninstall hook
+delete  d3d12.dll and ROTTR-menu-hook.asi
+
