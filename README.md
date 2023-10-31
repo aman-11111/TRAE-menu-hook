@@ -1,3 +1,39 @@
+#ROTTR-mod-loader  (a modification of TRAE-menu-hook, no menu)
+
+##What is included: 
+This is an expansion of ThelIndra55's TRAE-menu-hook  (https://github.com/TheIndra55/TRAE-menu-hook) to enable ROTTR loading of external mod file.
+It does not offer any menu, it load mod files (AlphaZomega's style ROTTR mod files https://www.nexusmods.com/riseofthetombraider/mods/20?tab=files) (*.tr2mesh *.tr2pcd) into game on game start, no need to install these files to update tiger archive.
+This currently only works for steam build 1026 and the current stream build (1027 ???).
+
+Limited support of in-game mod reload: 
+1. load a save game  where Lara is near a camp fire.
+2. After add/replace/delete some mod files, immediately press "ESC" and select "reload checkpoint" to re-sync internal mod list. Game will crash if forget to reload.
+3. New additions (mesh/texture) do not shows up right away. use the camp fire and switch to another costume and switch back to see the added sections.
+4. There are still some sequences of add/remove mods causing a reload to crash, haven't pinned down the exact sequence to reproduce problem.
+
+
+##Installtion:
+-copy d3d12.dll and ROTTR-Menu-Hook.asi from bin\ direcotry to ROTTR installation directory.
+-create a mods\ subdirectory under ROTTR installation directory
+
+##To convert existing mods:
+- Get the mod_prep_tools\ and contents folder from this github
+- Assumptions: all .tr2mesh and .tr2pcd  file conatins section number in their file name.
+copy  ??????.drm and the corresponding *.tr2mesh *.tr2pcd file to the mod_prep_tools\ directory
+- switch to mod_prep_tools\ dir, run  convert.cmd  <drm file name>
+- if all goes well, you will get a mod_out\ folder contain the renamed assets. 
+- rename mod_out\ to something like 00001_<mod_name>\ and move this directory inside <ROTTR_game_dir>/mods/
+- you can have more than one  000??_<mod_name> inside mods/. The bigger 000?? number mods override the lowest number if they contain the same asset file name
+ 
+
+##ininstall a mods:
+delete the 000??_<mod name> folder
+
+##uninstall hook
+delete  d3d12.dll and ROTTR-menu-hook.asi
+
+
+
 # TRAE-menu-hook
 
 Reverse engineering project for Tomb Raider LAU games, this repo contains the code for TRAE-menu-hook menu for Tomb Raider Anniversary, Legend and Underworld.
